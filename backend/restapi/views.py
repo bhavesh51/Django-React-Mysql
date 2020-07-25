@@ -23,10 +23,7 @@ def cards(request):
 @api_view(['POST'])
 def card_list(request):
     card_data = JSONParser().parse(request)
-    #transactionSerialization = transactionSerialization(data=card_data)
-    # if transactionSerialization.is_valid():
-    #     transactionSerialization.save()
-    #return JsonResponse(transactionSerialization.data, status=status.HTTP_201_CREATED) 
-    #return JsonResponse(transactionSerialization.errors, status=status.HTTP_400_BAD_REQUEST)
-    #card_data = JSONParser().parse(request)
-    return JsonResponse(card_data)
+    #card_data = Cards.objects.all()
+    cards_serializer = cardSerializer(card_data, many=True)
+    return JsonResponse(cards_serializer.data, safe=False)
+    #return JsonResponse(card_data)
