@@ -1,0 +1,150 @@
+# =============================================================
+# openshift/05-frontend.yaml
+# React + nginx frontend deployment, service, and route.
+# =============================================================
+
+# ---------------------------------------------------------------
+# ImageStream
+# ---------------------------------------------------------------
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: paygate-frontend
+  namespace: paygate
+  labels:
+    app: paygate-frontend
+    app.kubernetes.io/part-of: paygate
+spec:
+  lookupPolicy:
+    local: true
+---
+# ---------------------------------------------------------------
+# BuildConfig
+# ---------------------------------------------------------------
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: paygate-frontend
+  namespace: paygate
+  labels:
+    app: paygate-frontend
+    app.kubernetes.io/part-of: paygate
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+      buildArgs:
+        # REACT_APP_API_URL is left empty so the SPA uses
+        # same-origin requests (proxied by nginx to the backend).
+        - name: REACT_APP_API_URL
+          value: ""
+  output:
+    to:
+      kind: ImageStreamTag
+      name: "paygate-frontend:latest"
+  triggers: []
+---
+# ---------------------------------------------------------------
+# Deployment
+# ---------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paygate-frontend
+  namespace: paygate
+  labels:
+    app: paygate-frontend
+    app.kubernetes.io/part-of: paygate
+  annotations:
+    image.openshift.io/triggers: >
+      [{"from":{"kind":"ImageStreamTag","name":"paygate-frontend:latest"},
+        "fieldPath":"spec.template.spec.containers[0].image"}]
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: paygate-frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: paygate-frontend
+        app.kubernetes.io/part-of: paygate
+    spec:
+      containers:
+        - name: frontend
+          image: paygate-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+# ---------------------------------------------------------------
+# Service
+# ---------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: paygate-frontend
+  namespace: paygate
+  labels:
+    app: paygate-frontend
+    app.kubernetes.io/part-of: paygate
+spec:
+  selector:
+    app: paygate-frontend
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  type: ClusterIP
+---
+# ---------------------------------------------------------------
+# Route — public HTTPS route for the frontend
+# ---------------------------------------------------------------
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: paygate-frontend
+  namespace: paygate
+  labels:
+    app: paygate-frontend
+    app.kubernetes.io/part-of: paygate
+spec:
+  to:
+    kind: Service
+    name: paygate-frontend
+  port:
+    targetPort: 8080
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

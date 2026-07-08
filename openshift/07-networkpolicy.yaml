@@ -1,0 +1,72 @@
+# =============================================================
+# openshift/07-networkpolicy.yaml
+# Zero-trust network policies:
+#   - frontend  → backend  (port 8000) only
+#   - backend   → mysql    (port 3306) only
+#   - no pod-to-pod traffic otherwise
+# =============================================================
+
+# Allow frontend pods to reach backend pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-backend
+  namespace: paygate
+spec:
+  podSelector:
+    matchLabels:
+      app: paygate-backend
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: paygate-frontend
+      ports:
+        - protocol: TCP
+          port: 8000
+    # Also allow the OpenShift router (ingress) to reach the backend directly
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 8000
+---
+# Allow backend pods to reach MySQL
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-backend-to-mysql
+  namespace: paygate
+spec:
+  podSelector:
+    matchLabels:
+      app: paygate-mysql
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: paygate-backend
+      ports:
+        - protocol: TCP
+          port: 3306
+---
+# Allow the OpenShift router to reach the frontend
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-frontend
+  namespace: paygate
+spec:
+  podSelector:
+    matchLabels:
+      app: paygate-frontend
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 8080

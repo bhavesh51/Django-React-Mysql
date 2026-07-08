@@ -1,0 +1,20 @@
+# =============================================================
+# openshift/02-configmap.yaml
+# Non-sensitive application configuration.
+# =============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: paygate-config
+  namespace: paygate
+  labels:
+    app.kubernetes.io/part-of: paygate
+data:
+  DB_HOST: "paygate-mysql"
+  DB_PORT: "3306"
+  DJANGO_DEBUG: "False"
+  DJANGO_ALLOWED_HOSTS: "paygate-backend,paygate-backend.paygate.svc.cluster.local,localhost"
+  # CORS_EXTRA_ORIGINS is patched by deploy.sh once the frontend Route is known
+  CORS_EXTRA_ORIGINS: ""
+  # Gunicorn workers = 2 * CPU + 1  (adjust for your node size)
+  GUNICORN_WORKERS: "3"

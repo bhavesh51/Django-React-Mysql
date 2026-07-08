@@ -1,0 +1,11 @@
+# =============================================================
+# openshift/00-namespace.yaml
+# Creates the dedicated project/namespace for the application.
+# =============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: paygate
+  labels:
+    app.kubernetes.io/part-of: paygate
+    environment: production

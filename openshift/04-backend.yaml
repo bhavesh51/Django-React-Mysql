@@ -1,0 +1,172 @@
+# =============================================================
+# openshift/04-backend.yaml
+# Django + Gunicorn backend deployment, service, and route.
+# =============================================================
+
+# ---------------------------------------------------------------
+# ImageStream — tracks the backend container image
+# ---------------------------------------------------------------
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: paygate-backend
+  namespace: paygate
+  labels:
+    app: paygate-backend
+    app.kubernetes.io/part-of: paygate
+spec:
+  lookupPolicy:
+    local: true
+---
+# ---------------------------------------------------------------
+# BuildConfig — S2I-style Docker build from the Git repo
+# (or replace with an external registry push in deploy.sh)
+# ---------------------------------------------------------------
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: paygate-backend
+  namespace: paygate
+  labels:
+    app: paygate-backend
+    app.kubernetes.io/part-of: paygate
+spec:
+  source:
+    type: Binary       # deploy.sh uploads the local source directory
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: "paygate-backend:latest"
+  triggers: []         # manual triggers only — CI/CD pipeline owns this
+---
+# ---------------------------------------------------------------
+# Deployment
+# ---------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paygate-backend
+  namespace: paygate
+  labels:
+    app: paygate-backend
+    app.kubernetes.io/part-of: paygate
+  annotations:
+    # Trigger a rollout whenever the ImageStream tag changes
+    image.openshift.io/triggers: >
+      [{"from":{"kind":"ImageStreamTag","name":"paygate-backend:latest"},
+        "fieldPath":"spec.template.spec.containers[0].image"}]
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: paygate-backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: paygate-backend
+        app.kubernetes.io/part-of: paygate
+    spec:
+      containers:
+        - name: backend
+          # Image is resolved from the ImageStream by OpenShift
+          image: paygate-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: paygate-config
+          env:
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: paygate-secret
+                  key: db-name
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: paygate-secret
+                  key: db-user
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: paygate-secret
+                  key: db-password
+            - name: DJANGO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: paygate-secret
+                  key: django-secret-key
+          livenessProbe:
+            httpGet:
+              path: /api/transactions/
+              port: 8000
+            initialDelaySeconds: 40
+            periodSeconds: 30
+            failureThreshold: 4
+          readinessProbe:
+            httpGet:
+              path: /api/transactions/
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+# ---------------------------------------------------------------
+# Service
+# ---------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: paygate-backend
+  namespace: paygate
+  labels:
+    app: paygate-backend
+    app.kubernetes.io/part-of: paygate
+spec:
+  selector:
+    app: paygate-backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+  type: ClusterIP
+---
+# ---------------------------------------------------------------
+# Route — exposes the backend API publicly via HTTPS edge termination
+# ---------------------------------------------------------------
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: paygate-backend
+  namespace: paygate
+  labels:
+    app: paygate-backend
+    app.kubernetes.io/part-of: paygate
+spec:
+  to:
+    kind: Service
+    name: paygate-backend
+  port:
+    targetPort: 8000
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

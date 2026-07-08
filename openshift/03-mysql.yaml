@@ -1,0 +1,135 @@
+# =============================================================
+# openshift/03-mysql.yaml
+# MySQL 8.0 deployment with a PersistentVolumeClaim.
+# =============================================================
+
+# ---------------------------------------------------------------
+# PersistentVolumeClaim — 5 Gi for MySQL data
+# ---------------------------------------------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: paygate-mysql-pvc
+  namespace: paygate
+  labels:
+    app: paygate-mysql
+    app.kubernetes.io/part-of: paygate
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+# ---------------------------------------------------------------
+# Deployment
+# ---------------------------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paygate-mysql
+  namespace: paygate
+  labels:
+    app: paygate-mysql
+    app.kubernetes.io/part-of: paygate
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: paygate-mysql
+  strategy:
+    type: Recreate          # MySQL requires Recreate (single writer)
+  template:
+    metadata:
+      labels:
+        app: paygate-mysql
+        app.kubernetes.io/part-of: paygate
+    spec:
+      # OpenShift may assign an arbitrary UID; grant the mysql group write
+      securityContext:
+        fsGroup: 999        # mysql group id
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+              protocol: TCP
+          env:
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: paygate-secret
+                  key: db-name
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: paygate-secret
+                  key: db-user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: paygate-secret
+                  key: db-password
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: paygate-secret
+                  key: db-root-password
+            - name: MYSQL_CHARSET
+              value: utf8mb4
+          args:
+            - "--character-set-server=utf8mb4"
+            - "--collation-server=utf8mb4_unicode_ci"
+            - "--default-authentication-plugin=mysql_native_password"
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "mysqladmin ping -u root -p${MYSQL_ROOT_PASSWORD}"
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "mysql -u ${MYSQL_USER} -p${MYSQL_PASSWORD} -e 'SELECT 1' ${MYSQL_DATABASE}"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+      volumes:
+        - name: mysql-data
+          persistentVolumeClaim:
+            claimName: paygate-mysql-pvc
+---
+# ---------------------------------------------------------------
+# Service — ClusterIP (only reachable inside the cluster)
+# ---------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: paygate-mysql
+  namespace: paygate
+  labels:
+    app: paygate-mysql
+    app.kubernetes.io/part-of: paygate
+spec:
+  selector:
+    app: paygate-mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+      protocol: TCP
+  type: ClusterIP
